@@ -1,0 +1,55 @@
+# Chaos — team activity sources
+# Edit this file to add/remove GitHub repos, Jira projects, or people.
+# Restart the server (or wait for hot-reload in dev) for changes to apply.
+
+github:
+  token_env: GITHUB_TOKEN
+  repos:
+    - { owner: reasoningco, name: ChefOS }
+    - { owner: reasoningco, name: ChefOsLP }
+    - { owner: reasoningco, name: frontdesk }
+    - { owner: reasoningco, name: Autoflow }
+    - { owner: reasoningco, name: kanyon-web }
+    - { owner: reasoningco, name: kanyon-ios }
+    - { owner: reasoningco, name: infer }
+    - { owner: reasoningco, name: form }
+    - { owner: reasoningco, name: claude-skills-evalkit }
+    - { owner: reasoningco, name: ruff-roofing.com }
+    - { owner: reasoningco, name: autoOS }
+    - { owner: anmolgxrg,   name: reasoningcompany-com }
+    - { owner: anmolgxrg,   name: parlayresearch }
+    - { owner: anmolgxrg,   name: parlayserver }
+    - { owner: anmolgxrg,   name: precedal-site }
+    - { owner: anmolgxrg,   name: docs-precedal-com }
+
+jira:
+  # Atlassian org "reasoning" / site TRC Jira
+  # (org a5229fe2-955a-45af-ab47-39728357343d, cloud 61d51752-ba4f-4b6f-8052-e56af898918d)
+  base_url: https://reasoning.atlassian.net
+  email_env: JIRA_EMAIL
+  token_env: JIRA_API_TOKEN
+  projects:
+    # `name` sets the UI bubble label. `repos` lists GitHub repos whose
+    # commits should bucket under the same project for clustering.
+    - { key: DEV,  name: ChefOS,     repos: [ChefOS, ChefOsLP] }
+    - { key: FRMS, name: Forms,      repos: [form] }
+    - { key: KNYN, name: Kanyon,     repos: [kanyon-web, kanyon-ios] }
+    - { key: OPS,  name: Operations }
+
+people:
+  - display_name: Anmol Garg
+    github: anmolgxrg
+    jira_account_id: "712020:c8e7e85b-61ca-4a33-8353-4983cae472c1"
+  - display_name: Kavan Patel
+    github: Kavan9090
+    jira_account_id: "712020:219275cf-e720-46df-99ee-60080baebd67"
+  - display_name: Carlin Joseph
+    github: Carlinsj
+    jira_account_id: "712020:6accc134-18c6-44e6-a77a-2c00d9f8bf80"
+  - display_name: Aryan Raut
+    github: ryan7626
+    jira_account_id: "712020:b529f0c6-c839-408e-a963-cb25e985b5de"
+  - display_name: Sanvith Reddy
+    github: sanvithreddyy
+    github_aliases: [sanvith]
+    jira_account_id: "712020:8858cfc5-c9e9-4065-9f12-63c98189b26d"

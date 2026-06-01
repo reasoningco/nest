@@ -4,6 +4,7 @@ set -euo pipefail
 HOST="${CLOUD_AGENT_HOST:-jensen}"
 SESSION="${CLOUD_AGENT_SESSION:-ai}"
 CLAUDE_WINDOW="${CLOUD_AGENT_CLAUDE_WINDOW:-Claude}"
+CLAUDE_SESSION_PREFIX="${CLOUD_AGENT_CLAUDE_SESSION_PREFIX:-claude}"
 CODEX_WINDOW="${CLOUD_AGENT_CODEX_WINDOW:-Codex}"
 WORKDIR="${CLOUD_AGENT_WORKDIR:-}"
 REPO="${CLOUD_AGENT_REPO:-}"
@@ -19,7 +20,12 @@ SSH_OPTS=(
 usage() {
   cat <<'USAGE'
 Usage:
-  cloud-agent [claude]          Attach to the Jetson ai tmux session and select Claude
+  cloud-agent [claude]          Start and attach a new Jetson Claude tmux session
+  cloud-agent claude-shared     Attach to the shared Jetson ai:Claude window
+  cloud-agent claude-sessions   List independent Jetson Claude tmux sessions
+  cloud-agent claude-attach ID  Attach to an independent Jetson Claude session
+  cloud-agent claude-stop ID    Kill an independent Jetson Claude session
+  cloud-agent claude-stop-all   Kill all independent Jetson Claude sessions
   cloud-agent attach            Attach to the Jetson ai tmux session
   cloud-agent codex             Attach to the Jetson ai tmux session and select/start Codex
   cloud-agent prompt "task"     Send a prompt to Claude without attaching
@@ -33,6 +39,8 @@ Usage:
 Environment:
   CLOUD_AGENT_HOST              SSH host, default: jensen
   CLOUD_AGENT_SESSION           tmux session, default: ai
+  CLOUD_AGENT_CLAUDE_SESSION_PREFIX
+                                independent Claude tmux session prefix, default: claude
   CLOUD_AGENT_WORKDIR           tmux session workdir, default: $HOME/src on Jetson
   CLOUD_AGENT_REPO              repo used when starting Codex, default: $HOME/src/ChefOS
   CLOUD_AGENT_DANGEROUS_PERMISSIONS
@@ -54,6 +62,7 @@ shq() {
 remote_assignments() {
   printf 'CLOUD_AGENT_SESSION=%s ' "$(shq "$SESSION")"
   printf 'CLOUD_AGENT_CLAUDE_WINDOW=%s ' "$(shq "$CLAUDE_WINDOW")"
+  printf 'CLOUD_AGENT_CLAUDE_SESSION_PREFIX=%s ' "$(shq "$CLAUDE_SESSION_PREFIX")"
   printf 'CLOUD_AGENT_CODEX_WINDOW=%s ' "$(shq "$CODEX_WINDOW")"
   printf 'CLOUD_AGENT_DANGEROUS_PERMISSIONS=%s ' "$(shq "${CLOUD_AGENT_DANGEROUS_PERMISSIONS:-1}")"
   if [ -n "$WORKDIR" ]; then
@@ -87,18 +96,32 @@ run_remote_tty() {
 remote_common='
 set -euo pipefail
 export PATH="$HOME/.local/bin:$HOME/.local/share/micromamba/envs/ai-agents/bin:$HOME/bin:$PATH"
+if [ -f "$HOME/.config/ai-agents/telemetry.env" ]; then
+  . "$HOME/.config/ai-agents/telemetry.env"
+fi
 session="${CLOUD_AGENT_SESSION:-ai}"
 workdir="${CLOUD_AGENT_WORKDIR:-$HOME/src}"
 repo="${CLOUD_AGENT_REPO:-$HOME/src/ChefOS}"
 dangerous="${CLOUD_AGENT_DANGEROUS_PERMISSIONS:-1}"
+claude_session_prefix="${CLOUD_AGENT_CLAUDE_SESSION_PREFIX:-claude}"
 tmux_bin="$HOME/.local/share/micromamba/envs/ai-agents/bin/tmux"
 if [ -x "$HOME/.local/bin/tmux" ]; then
   tmux_bin="$HOME/.local/bin/tmux"
 fi
+sync_tmux_env() {
+  "$tmux_bin" set-environment -g PATH "$PATH" 2>/dev/null || true
+  if [ -n "${CHAOS_TELEMETRY_URL:-}" ]; then
+    "$tmux_bin" set-environment -g CHAOS_TELEMETRY_URL "$CHAOS_TELEMETRY_URL" 2>/dev/null || true
+  fi
+  if [ -n "${CHAOS_TELEMETRY_TOKEN:-}" ]; then
+    "$tmux_bin" set-environment -g CHAOS_TELEMETRY_TOKEN "$CHAOS_TELEMETRY_TOKEN" 2>/dev/null || true
+  fi
+}
 '
 
 attach_script='
 '"$remote_common"'
+sync_tmux_env
 mkdir -p "$workdir"
 "$tmux_bin" has-session -t "$session" 2>/dev/null || "$tmux_bin" new-session -d -s "$session" -c "$workdir"
 if [ -x "$HOME/.local/bin/ai" ]; then
@@ -107,9 +130,10 @@ fi
 exec "$tmux_bin" new-session -A -s "$session" -c "$workdir"
 '
 
-claude_script='
+claude_shared_script='
 '"$remote_common"'
 window="${CLOUD_AGENT_CLAUDE_WINDOW:-Claude}"
+sync_tmux_env
 mkdir -p "$workdir"
 if [ -x "$HOME/.local/bin/claude-agent" ]; then
   CLOUD_AGENT_DANGEROUS_PERMISSIONS="$dangerous" "$HOME/.local/bin/claude-agent" >/dev/null
@@ -137,9 +161,132 @@ fi
 exec "$tmux_bin" new-session -A -s "$session" -c "$workdir"
 '
 
+claude_new_script='
+'"$remote_common"'
+window="${CLOUD_AGENT_CLAUDE_WINDOW:-Claude}"
+claude_args="${CLOUD_AGENT_CLAUDE_ARGS:-}"
+sync_tmux_env
+mkdir -p "$workdir"
+
+stamp="$(date +%Y%m%d-%H%M%S)"
+base="${claude_session_prefix}-${stamp}-${RANDOM}"
+name="$base"
+suffix=0
+while "$tmux_bin" has-session -t "$name" 2>/dev/null; do
+  suffix=$((suffix + 1))
+  name="${base}-${suffix}"
+done
+
+"$tmux_bin" new-session -d -s "$name" -n "$window" -c "$workdir"
+pane="$("$tmux_bin" list-panes -t "$name:$window" -F "#{pane_id}" | head -n 1)"
+quoted_workdir="$(printf "%q" "$workdir")"
+if [ "$dangerous" = "0" ]; then
+  start_cmd="cd $quoted_workdir && claude --strict-mcp-config"
+else
+  start_cmd="cd $quoted_workdir && claude --strict-mcp-config --dangerously-skip-permissions"
+fi
+if [ -n "$claude_args" ]; then
+  start_cmd="$start_cmd $claude_args"
+fi
+"$tmux_bin" send-keys -t "$pane" "$start_cmd" C-m
+printf "Started %s (%s)\n" "$name" "$pane" >&2
+exec "$tmux_bin" attach-session -t "$name"
+'
+
+claude_sessions_script='
+'"$remote_common"'
+sync_tmux_env
+if ! "$tmux_bin" list-sessions >/dev/null 2>&1; then
+  printf "No tmux sessions found.\n"
+  exit 0
+fi
+
+found=0
+while IFS="|" read -r name attached windows created; do
+  case "$name" in
+    "$claude_session_prefix"-*)
+      found=1
+      printf "%s\tattached=%s\twindows=%s\tcreated=%s\n" "$name" "$attached" "$windows" "$created"
+      ;;
+  esac
+done < <("$tmux_bin" list-sessions -F "#{session_name}|#{session_attached}|#{session_windows}|#{t:session_created}")
+if [ "$found" = "0" ]; then
+  printf "No independent Claude sessions found.\n"
+fi
+'
+
+claude_attach_script='
+'"$remote_common"'
+target="${CLOUD_AGENT_TARGET_SESSION:-}"
+if [ -z "$target" ]; then
+  printf "claude attach requires a session id from: claude sessions\n" >&2
+  exit 2
+fi
+case "$target" in
+  "$claude_session_prefix"-*) ;;
+  *)
+    printf "Refusing to attach non-Claude session: %s\n" "$target" >&2
+    exit 2
+    ;;
+esac
+sync_tmux_env
+if ! "$tmux_bin" has-session -t "$target" 2>/dev/null; then
+  printf "Claude session not found: %s\n" "$target" >&2
+  exit 1
+fi
+exec "$tmux_bin" attach-session -t "$target"
+'
+
+claude_stop_script='
+'"$remote_common"'
+target="${CLOUD_AGENT_TARGET_SESSION:-}"
+if [ -z "$target" ]; then
+  printf "claude stop requires a session id from: claude sessions\n" >&2
+  exit 2
+fi
+case "$target" in
+  "$claude_session_prefix"-*) ;;
+  *)
+    printf "Refusing to stop non-Claude session: %s\n" "$target" >&2
+    exit 2
+    ;;
+esac
+if ! "$tmux_bin" has-session -t "$target" 2>/dev/null; then
+  printf "Claude session not found: %s\n" "$target" >&2
+  exit 1
+fi
+"$tmux_bin" detach-client -s "$target" 2>/dev/null || true
+"$tmux_bin" kill-session -t "$target"
+printf "Stopped %s\n" "$target"
+'
+
+claude_stop_all_script='
+'"$remote_common"'
+if ! "$tmux_bin" list-sessions >/dev/null 2>&1; then
+  printf "No tmux sessions found.\n"
+  exit 0
+fi
+
+found=0
+while IFS= read -r name; do
+  case "$name" in
+    "$claude_session_prefix"-*)
+      "$tmux_bin" detach-client -s "$name" 2>/dev/null || true
+      "$tmux_bin" kill-session -t "$name"
+      printf "Stopped %s\n" "$name"
+      found=1
+      ;;
+  esac
+done < <("$tmux_bin" list-sessions -F "#{session_name}")
+if [ "$found" = "0" ]; then
+  printf "No independent Claude sessions found.\n"
+fi
+'
+
 codex_script='
 '"$remote_common"'
 window="${CLOUD_AGENT_CODEX_WINDOW:-Codex}"
+sync_tmux_env
 mkdir -p "$workdir"
 "$tmux_bin" has-session -t "$session" 2>/dev/null || "$tmux_bin" new-session -d -s "$session" -c "$workdir"
 if ! "$tmux_bin" list-windows -t "$session" -F "#{window_name}" | grep -Fx "$window" >/dev/null; then
@@ -166,6 +313,7 @@ exec "$tmux_bin" new-session -A -s "$session" -c "$workdir"
 
 status_script='
 '"$remote_common"'
+sync_tmux_env
 if [ -x "$HOME/.local/bin/agent-console-status" ]; then
   "$HOME/.local/bin/agent-console-status"
 else
@@ -177,7 +325,55 @@ if "$tmux_bin" has-session -t "$session" 2>/dev/null; then
 else
   printf "  session not found: %s\n" "$session"
 fi
+printf "\nIndependent Claude sessions:\n"
+found=0
+if "$tmux_bin" list-sessions >/dev/null 2>&1; then
+  while IFS="|" read -r name attached windows created; do
+    case "$name" in
+      "$claude_session_prefix"-*)
+        found=1
+        printf "  %s attached=%s windows=%s created=%s\n" "$name" "$attached" "$windows" "$created"
+        ;;
+    esac
+  done < <("$tmux_bin" list-sessions -F "#{session_name}|#{session_attached}|#{session_windows}|#{t:session_created}")
+fi
+if [ "$found" = "0" ]; then
+  printf "  none\n"
+fi
 '
+
+shell_words() {
+  local word
+  for word in "$@"; do
+    printf '%q ' "$word"
+  done
+}
+
+start_claude_session() {
+  local claude_args
+  claude_args="$(shell_words "$@")"
+  ssh_tty "$(remote_assignments) CLOUD_AGENT_CLAUDE_ARGS=$(shq "$claude_args") bash -lc $(shq "$claude_new_script")"
+}
+
+attach_claude_session() {
+  local target
+  target="${1:-}"
+  if [ -z "$target" ]; then
+    printf 'usage: cloud-agent claude-attach SESSION\n' >&2
+    return 2
+  fi
+  ssh_tty "$(remote_assignments) CLOUD_AGENT_TARGET_SESSION=$(shq "$target") bash -lc $(shq "$claude_attach_script")"
+}
+
+stop_claude_session() {
+  local target
+  target="${1:-}"
+  if [ -z "$target" ]; then
+    printf 'usage: cloud-agent claude-stop SESSION\n' >&2
+    return 2
+  fi
+  ssh_plain "$(remote_assignments) CLOUD_AGENT_TARGET_SESSION=$(shq "$target") bash -lc $(shq "$claude_stop_script")"
+}
 
 prompt() {
   local prompt_text
@@ -254,7 +450,22 @@ main() {
 
   case "$command" in
     claude)
-      run_remote_tty "$claude_script"
+      start_claude_session "$@"
+      ;;
+    claude-shared|shared)
+      run_remote_tty "$claude_shared_script"
+      ;;
+    claude-sessions|sessions|list)
+      run_remote "$claude_sessions_script"
+      ;;
+    claude-attach)
+      attach_claude_session "$@"
+      ;;
+    claude-stop|claude-end)
+      stop_claude_session "$@"
+      ;;
+    claude-stop-all|claude-end-all)
+      run_remote "$claude_stop_all_script"
       ;;
     attach|tmux)
       run_remote_tty "$attach_script"

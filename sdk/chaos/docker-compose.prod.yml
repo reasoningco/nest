@@ -1,0 +1,11 @@
+# Production override for the cookbook monorepo deployment.
+#
+# The base compose file is kept useful for local development. Production
+# keeps secrets and source routing outside git under /etc/chaos.
+services:
+  chaos:
+    ports: !override
+      - "127.0.0.1:3078:3000"
+    volumes: !override
+      - chaos-data:/app/data
+      - /etc/chaos/config:/app/config:ro

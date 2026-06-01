@@ -1,6 +1,7 @@
 # Cursor Cookbook
 
-This repo contains small examples for building with Cursor.
+This repo contains small examples for building with Cursor, plus the internal
+NEST platform services that run the Cursor/Jira/Chaos workflow.
 
 ## Cursor SDK
 
@@ -19,6 +20,16 @@ A web app for spinning up agents to scaffold new projects and iterate on ideas i
 ### [Kanban board](sdk/agent-kanban)
 
 A kanban board for viewing Cursor Cloud Agents, grouping them by status or repository, previewing artifacts, and creating new cloud agents from a repository and prompt.
+
+### [Chaos activity backend](sdk/chaos)
+
+The activity, telemetry, Jira, GitHub, and project LOC backend consumed by
+NEST. Production runs it as a Docker Compose service.
+
+### [Jira Cursor bridge](sdk/jira-cursor-bridge)
+
+The webhook bridge that turns Jira trigger labels into Cursor Cloud Agent runs,
+tracks PR state, and exposes the routing admin API used by NEST.
 
 ### [Coding agent CLI](sdk/coding-agent-cli)
 

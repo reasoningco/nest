@@ -1,0 +1,41 @@
+{
+  "name": "chaos",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -H 0.0.0.0 -p ${PORT:-3000}",
+    "lint": "next lint",
+    "test": "vitest run",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate deploy"
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.0.2",
+    "@prisma/client": "^5.22.0",
+    "chokidar": "^3.6.0",
+    "clsx": "^2.1.1",
+    "jira.js": "^4.0.4",
+    "next": "14.2.15",
+    "node-cron": "^3.0.3",
+    "openai": "^4.70.0",
+    "recharts": "^2.13.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "yaml": "^2.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "@types/node-cron": "^3.0.11",
+    "@types/react": "^18.3.11",
+    "@types/react-dom": "^18.3.0",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "prisma": "^5.22.0",
+    "tailwindcss": "^3.4.13",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.2"
+  }
+}

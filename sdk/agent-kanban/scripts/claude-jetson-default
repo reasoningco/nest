@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Plain `claude` starts an independent Jetson tmux Claude session.
+# Use `claude-local` for the local Claude Code binary.
+CLOUD_AGENT_BIN="${CLOUD_AGENT_BIN:-$HOME/.local/bin/cloud-agent}"
+CLAUDE_LOCAL_BIN="${CLAUDE_LOCAL_BIN:-$HOME/.local/bin/claude-local}"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  claude                    Start a new independent Jetson Claude session
+  claude sessions           List independent Jetson Claude sessions
+  claude attach SESSION     Attach to an existing independent session
+  claude stop SESSION       Stop an independent session
+  claude stop-all           Stop all independent sessions
+  claude shared             Attach to the shared ai:Claude window
+  claude local [args...]    Run the local Claude Code binary
+  claude-local [args...]    Run the local Claude Code binary
+USAGE
+}
+
+if [ "${CLAUDE_LOCAL:-0}" = "1" ]; then
+  exec "$CLAUDE_LOCAL_BIN" "$@"
+fi
+
+if [ ! -x "$CLOUD_AGENT_BIN" ]; then
+  printf 'claude wrapper: cloud-agent not found at %s\n' "$CLOUD_AGENT_BIN" >&2
+  printf 'Use claude-local for the local Claude Code binary.\n' >&2
+  exit 127
+fi
+
+case "${1-}" in
+  -h|--help|help)
+    usage
+    ;;
+  local|--local)
+    shift
+    exec "$CLAUDE_LOCAL_BIN" "$@"
+    ;;
+  sessions|list|ls)
+    shift
+    exec "$CLOUD_AGENT_BIN" claude-sessions "$@"
+    ;;
+  attach)
+    shift
+    exec "$CLOUD_AGENT_BIN" claude-attach "$@"
+    ;;
+  stop|end|kill)
+    shift
+    exec "$CLOUD_AGENT_BIN" claude-stop "$@"
+    ;;
+  stop-all|end-all|kill-all)
+    shift
+    exec "$CLOUD_AGENT_BIN" claude-stop-all "$@"
+    ;;
+  shared)
+    shift
+    exec "$CLOUD_AGENT_BIN" claude-shared "$@"
+    ;;
+  status|doctor|tunnel|token)
+    exec "$CLOUD_AGENT_BIN" "$@"
+    ;;
+  *)
+    exec "$CLOUD_AGENT_BIN" claude "$@"
+    ;;
+esac

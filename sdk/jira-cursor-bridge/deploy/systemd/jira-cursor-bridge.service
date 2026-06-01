@@ -1,0 +1,24 @@
+[Unit]
+Description=Jira -> Cursor Cloud Agent bridge
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/cookbook/sdk/jira-cursor-bridge
+EnvironmentFile=/etc/jira-cursor-bridge.env
+ExecStart=/usr/bin/node --import tsx src/index.ts
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=jira-cursor-bridge
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/jira-cursor-bridge
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

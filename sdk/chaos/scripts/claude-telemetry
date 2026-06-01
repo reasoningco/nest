@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# claude-telemetry — emit Claude Code lifecycle events to chaos.
+#
+# Wired up via Claude Code hooks in ~/.claude/settings.json — see
+# `claude-telemetry install` for the one-shot setup.
+#
+# Privacy: this script never sends file contents or command strings. The
+# only prompt body it sends is on UserPromptSubmit events, truncated to 500
+# chars — chaos persists ONLY the first one per session as a session opener
+# so teammates can see "what was Maya working on?" without reading along.
+# Set CHAOS_TELEMETRY_NO_PROMPT=1 to opt out and never send prompt bodies.
+# Fields emitted: {sessionUuid, user, host, cwd, type, tool?, prompt?, ts}.
+#
+# Required env (set in your shell rc; see README):
+#   CHAOS_TELEMETRY_URL    — e.g. https://chaos.reasoning.company
+#   CHAOS_TELEMETRY_TOKEN  — bearer token (matches server's CHAOS_TELEMETRY_TOKEN)
+#
+# Optional:
+#   CLAUDE_TELEMETRY_USER  — explicit display name; falls back to git email,
+#                            then $USER@hostname.
+#
+# Disable temporarily: `export CHAOS_TELEMETRY_DISABLE=1` in any shell.
+
+set -u
+
+EVENT_TYPE="${1:-Unknown}"
+
+# Disabled? Exit cleanly so hook chain isn't blocked.
+if [[ "${CHAOS_TELEMETRY_DISABLE:-}" = "1" ]]; then
+  exit 0
+fi
+if [[ -z "${CHAOS_TELEMETRY_URL:-}" || -z "${CHAOS_TELEMETRY_TOKEN:-}" ]]; then
+  # Not configured. Helper is a no-op — don't fail the hook.
+  exit 0
+fi
+
+# Read hook payload from stdin (Claude Code passes context as JSON).
+hook_json="$(cat 2>/dev/null || true)"
+
+# Resolve fields with safe fallbacks. We use python3 for JSON parsing because
+# it's effectively always available on dev laptops; jq is not.
+extract() {
+  python3 - "$1" "$hook_json" <<'PY' 2>/dev/null
+import json, sys
+key = sys.argv[1]
+try:
+    d = json.loads(sys.argv[2])
+except Exception:
+    print(""); sys.exit(0)
+def find(obj, k):
+    if isinstance(obj, dict):
+        if k in obj:
+            return obj[k]
+        for v in obj.values():
+            r = find(v, k)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = find(v, k)
+            if r is not None:
+                return r
+    return None
+v = find(d, key)
+if v is None:
+    print("")
+elif isinstance(v, (dict, list)):
+    print("")
+else:
+    print(v)
+PY
+}
+
+session_uuid="$(extract session_id)"
+[[ -z "$session_uuid" ]] && session_uuid="$(extract sessionId)"
+[[ -z "$session_uuid" ]] && session_uuid="$(extract uuid)"
+if [[ -z "$session_uuid" ]]; then
+  # No session id from Claude → derive a stable per-process key. Better than
+  # losing the event entirely; merges into one row per shell session.
+  session_uuid="proc-${PPID}-${USER:-unknown}-$(date +%Y%m%d)"
+fi
+
+tool_name="$(extract tool_name)"
+[[ -z "$tool_name" ]] && tool_name="$(extract toolName)"
+
+# Only send the prompt body for UserPromptSubmit events; truncate to keep
+# payload bounded. Caller can opt out via CHAOS_TELEMETRY_NO_PROMPT=1.
+prompt_body=""
+if [[ "$EVENT_TYPE" = "UserPromptSubmit" && "${CHAOS_TELEMETRY_NO_PROMPT:-}" != "1" ]]; then
+  prompt_body="$(extract prompt)"
+  # Truncate to 500 bytes; server re-truncates as authoritative cap.
+  if [[ ${#prompt_body} -gt 500 ]]; then
+    prompt_body="${prompt_body:0:500}"
+  fi
+fi
+
+cwd="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+host="$(hostname 2>/dev/null || echo unknown)"
+
+if [[ -n "${CLAUDE_TELEMETRY_USER:-}" ]]; then
+  user="$CLAUDE_TELEMETRY_USER"
+else
+  # Try git email of cwd repo, then fall back.
+  git_email="$(git -C "$cwd" config user.email 2>/dev/null || true)"
+  if [[ -n "$git_email" ]]; then
+    user="$git_email"
+  else
+    user="${USER:-anon}@${host}"
+  fi
+fi
+
+# Build the JSON payload by hand (no jq dependency).
+escape() {
+  python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
+}
+
+payload="$(cat <<EOF
+{
+  "sessionUuid": $(escape "$session_uuid"),
+  "user": $(escape "$user"),
+  "host": $(escape "$host"),
+  "cwd": $(escape "$cwd"),
+  "type": $(escape "$EVENT_TYPE"),
+  "tool": $(escape "$tool_name"),
+  "prompt": $(escape "$prompt_body"),
+  "ts": $(escape "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)")
+}
+EOF
+)"
+
+# Fire-and-forget. Short timeout so a slow chaos doesn't hold up the hook.
+curl -sS -m 4 \
+  -X POST \
+  -H "Authorization: Bearer ${CHAOS_TELEMETRY_TOKEN}" \
+  -H "Content-Type: application/json" \
+  --data-raw "$payload" \
+  "${CHAOS_TELEMETRY_URL%/}/api/claude-event" \
+  >/dev/null 2>&1 &
+
+# Don't wait on the curl — exit immediately so the hook chain is fast.
+disown 2>/dev/null || true
+exit 0

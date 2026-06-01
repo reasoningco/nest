@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-}"
+SECRET="${TELEGRAM_WEBHOOK_SECRET:-}"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  scripts/telegram-webhook set https://your-public-host/api/telegram/webhook
+  scripts/telegram-webhook info
+  scripts/telegram-webhook delete
+
+Environment:
+  TELEGRAM_BOT_TOKEN       Bot token from BotFather
+  TELEGRAM_WEBHOOK_SECRET  Secret sent by Telegram in X-Telegram-Bot-Api-Secret-Token
+USAGE
+}
+
+require_token() {
+  if [ -z "$BOT_TOKEN" ]; then
+    printf 'TELEGRAM_BOT_TOKEN is required\n' >&2
+    exit 2
+  fi
+}
+
+api() {
+  local method
+  method="$1"
+  shift
+  curl -fsS "https://api.telegram.org/bot${BOT_TOKEN}/${method}" "$@"
+  printf '\n'
+}
+
+command="${1:-help}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+case "$command" in
+  set)
+    require_token
+    if [ -z "$SECRET" ]; then
+      printf 'TELEGRAM_WEBHOOK_SECRET is required when setting the webhook\n' >&2
+      exit 2
+    fi
+    url="${1:-}"
+    if [ -z "$url" ]; then
+      usage >&2
+      exit 2
+    fi
+    api setWebhook \
+      --data-urlencode "url=${url}" \
+      --data-urlencode "secret_token=${SECRET}" \
+      --data-urlencode 'allowed_updates=["message"]'
+    ;;
+  info)
+    require_token
+    api getWebhookInfo
+    ;;
+  delete)
+    require_token
+    api deleteWebhook
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    printf 'unknown command: %s\n\n' "$command" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

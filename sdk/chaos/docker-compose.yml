@@ -1,0 +1,29 @@
+services:
+  chaos:
+    build: .
+    container_name: chaos
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=file:/app/data/app.db
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - JIRA_EMAIL=${JIRA_EMAIL}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+      - CHAOS_ACCESS_CODE=${CHAOS_ACCESS_CODE}
+      - CHAOS_GRAPH_CODE=${CHAOS_GRAPH_CODE}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_MODEL=${OPENROUTER_MODEL:-google/gemini-2.0-flash-lite-001}
+      - OPENROUTER_REFERRER=${OPENROUTER_REFERRER:-https://chaos.local}
+      - CHAOS_TELEMETRY_TOKEN=${CHAOS_TELEMETRY_TOKEN}
+      - PORT=3000
+      - HOST=0.0.0.0
+    ports:
+      # Bind to localhost only by default — this dashboard has no auth and is
+      # intended for internal-network access. Change to "3000:3000" if you
+      # front it with an internal reverse proxy.
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - chaos-data:/app/data
+      - ./config:/app/config
+
+volumes:
+  chaos-data:

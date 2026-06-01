@@ -1,0 +1,40 @@
+name: Jira Cursor Bridge CI
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/jira-cursor-bridge-ci.yml"
+      - "sdk/jira-cursor-bridge/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/jira-cursor-bridge-ci.yml"
+      - "sdk/jira-cursor-bridge/**"
+
+jobs:
+  typecheck-test:
+    name: Typecheck and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/jira-cursor-bridge
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: sdk/jira-cursor-bridge/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test

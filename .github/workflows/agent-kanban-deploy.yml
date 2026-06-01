@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "Git ref to deploy to the production server when rollback_ref is empty"
+        description: "Git ref to deploy to trc4 when rollback_ref is empty"
         required: true
         default: "main"
       rollback_ref:

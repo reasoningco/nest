@@ -86,6 +86,49 @@ By default the CLI starts Claude/Codex with dangerous non-interactive permission
 flags when it can. Set `CLOUD_AGENT_DANGEROUS_PERMISSIONS=0` before running
 `cloud-agent` if you need the old interactive confirmation behavior.
 
+## Telegram Bot
+
+NEST can accept Telegram commands at `/api/telegram/webhook` and fan them out to
+Jetson Claude Code or Cursor Cloud Agents. Configure these server-side variables:
+
+```bash
+TELEGRAM_BOT_TOKEN="<BotFather token>"
+TELEGRAM_WEBHOOK_SECRET="<random shared secret>"
+TELEGRAM_ALLOWED_CHAT_IDS="<your Telegram chat id>"
+CURSOR_API_KEY="<Cursor API key for cloud agent launches>"
+JETSON_AGENT_BASE_URL="http://127.0.0.1:8787"
+JETSON_AGENT_TOKEN="<token from ssh jensen '~/.local/bin/agent-console-token'>"
+```
+
+Set the webhook after the app is reachable from Telegram:
+
+```bash
+pnpm telegram:set-webhook https://your-public-host/api/telegram/webhook
+pnpm telegram:info
+```
+
+Send `/id` to the bot first, then add the returned chat id to
+`TELEGRAM_ALLOWED_CHAT_IDS`. Launch commands stay blocked until the allowlist is
+set. Supported commands:
+
+```text
+/claude <task>
+/claude <jetson-repo-name-or-path-or-git-url> | <task>
+/cursor <repo-id-or-url> | <task>
+/both <repo-id-or-url> | <task>
+/repos [search]
+/jetson-repos [search]
+/agents
+/status
+/tail [lines]
+```
+
+`/cursor <task>` also works when `TELEGRAM_DEFAULT_REPOSITORY_ID` is set.
+`/claude <task>` can also default to a Jetson repo when
+`TELEGRAM_DEFAULT_JETSON_REPO` is set. The bot token should live only in
+environment variables such as `.env.local` or your process manager, never in
+tracked files.
+
 ## Notes
 
 Repository listing is rate-limited by the Cloud Agents API and is cached briefly

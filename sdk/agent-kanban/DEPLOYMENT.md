@@ -1,7 +1,14 @@
 # Agent Kanban Deployment
 
-Production currently runs on the migrated production server from `/srv/cookbook/sdk/agent-kanban` under
+Production currently runs on `trc4` from `/srv/cookbook/sdk/agent-kanban` under
 the `agent-kanban` systemd unit. The working tree should stay on `main`.
+
+NEST now shares the cookbook repo with its two backend services:
+
+- `sdk/chaos` provides org activity, telemetry, Jira/GitHub ingestion, and
+  project LOC APIs.
+- `sdk/jira-cursor-bridge` receives Jira webhooks, starts Cursor Cloud Agents,
+  and owns repository routing state.
 
 ## Required Gates
 
@@ -38,7 +45,7 @@ The database records:
 ## RBAC
 
 Authentication is still Cursor API-key based, but authorization is role based.
-Set these environment variables on the production server for shared-company use:
+Set these environment variables on `trc4` for shared-company use:
 
 ```bash
 NEST_ADMIN_EMAILS="founder@example.com,lead@example.com"
@@ -68,16 +75,52 @@ The `cloud-agent` helper defaults `CLOUD_AGENT_DANGEROUS_PERMISSIONS=1`, which
 starts Claude/Codex with non-interactive permission bypass flags when possible.
 Set it to `0` only for manual sessions where a human can answer CLI prompts.
 
+## Telegram Bot
+
+Telegram ingress is served by `POST /api/telegram/webhook`. It verifies the
+`X-Telegram-Bot-Api-Secret-Token` header and then enforces
+`TELEGRAM_ALLOWED_CHAT_IDS` before launching any agent work.
+
+Required environment for Telegram:
+
+```bash
+TELEGRAM_BOT_TOKEN="<BotFather token>"
+TELEGRAM_WEBHOOK_SECRET="<random shared secret>"
+TELEGRAM_ALLOWED_CHAT_IDS="<comma-separated chat ids>"
+CURSOR_API_KEY="<server Cursor API key>"
+```
+
+Optional defaults:
+
+```bash
+TELEGRAM_DEFAULT_REPOSITORY_ID="<Cursor repository id or Git URL>"
+TELEGRAM_DEFAULT_JETSON_REPO="<Jetson repo name, path, or Git URL>"
+TELEGRAM_DEFAULT_CURSOR_BRANCH="main"
+TELEGRAM_DEFAULT_CURSOR_MODEL="auto"
+TELEGRAM_CURSOR_AUTO_CREATE_PR="true"
+```
+
+Set or inspect the webhook from the deployed app directory:
+
+```bash
+pnpm telegram:set-webhook https://your-public-host/api/telegram/webhook
+pnpm telegram:info
+```
+
+Send `/id` to the bot to discover the chat id, add it to
+`TELEGRAM_ALLOWED_CHAT_IDS`, then restart the service. Do not commit the bot
+token or webhook secret.
+
 ## Rollback
 
 Use the manual deploy workflow and set `rollback_ref` to a known-good commit on
-`main`. The workflow checks out `main` on the production server, resets it to that ref, runs the
+`main`. The workflow checks out `main` on `trc4`, resets it to that ref, runs the
 same gates, restarts `agent-kanban`, and health-checks `http://127.0.0.1:3210/`.
 
 Manual server fallback:
 
 ```bash
-ssh anmol@64.23.172.17
+ssh trc4
 cd /srv/cookbook
 git fetch origin --tags
 git checkout main

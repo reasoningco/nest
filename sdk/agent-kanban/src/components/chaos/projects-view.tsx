@@ -51,6 +51,7 @@ const WEEKS_FOR_RANGE: Record<Range, number | "all"> = {
 const LOC_REFRESH_STALE_MS = 15 * 60 * 1000;
 const LOC_REFRESH_POLL_MS = 8_000;
 const LOC_REFRESH_IDLE_POLL_MS = 60_000;
+const ACTIVITY_REFRESH_POLL_MS = 60_000;
 
 const LOC_COLORS = [
   "#c15f3c", // terracotta
@@ -138,29 +139,48 @@ export function ByProjectPanel({
   React.useEffect(() => {
     if (hasExternalActivity) return;
     let live = true;
-    const loadingTimer = window.setTimeout(() => {
-      if (live) setActivityLoading(true);
-    }, 0);
-    fetch(`/api/chaos/activity?range=${range}`, { cache: "no-store" })
-      .then(async (r) => {
+    let loadingTimer: number | null = null;
+    let pollTimer: number | null = null;
+
+    async function load(showLoading: boolean) {
+      if (showLoading) {
+        loadingTimer = window.setTimeout(() => {
+          if (live) setActivityLoading(true);
+        }, 0);
+      }
+
+      try {
+        const r = await fetch(`/api/chaos/activity?range=${range}`, {
+          cache: "no-store",
+        });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return (await r.json()) as ActivityPayload;
-      })
-      .then((d) => {
+        const d = (await r.json()) as ActivityPayload;
         if (!live) return;
         setActivity(d);
         setActivityErr(null);
-      })
-      .catch((e) => {
+      } catch (e) {
         if (!live) return;
         setActivityErr(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (live) setActivityLoading(false);
-      });
+      } finally {
+        if (loadingTimer) {
+          window.clearTimeout(loadingTimer);
+          loadingTimer = null;
+        }
+        if (live && showLoading) setActivityLoading(false);
+        if (live) {
+          pollTimer = window.setTimeout(
+            () => void load(false),
+            ACTIVITY_REFRESH_POLL_MS,
+          );
+        }
+      }
+    }
+
+    void load(true);
     return () => {
       live = false;
-      window.clearTimeout(loadingTimer);
+      if (loadingTimer) window.clearTimeout(loadingTimer);
+      if (pollTimer) window.clearTimeout(pollTimer);
     };
   }, [hasExternalActivity, range]);
 
@@ -200,6 +220,11 @@ export function ByProjectPanel({
     );
   }, [displayedActivity]);
 
+  const activityLocRefreshKey = React.useMemo(
+    () => buildActivityLocRefreshKey(displayedActivity),
+    [displayedActivity],
+  );
+
   return (
     <div className={cn("space-y-5", className)}>
       {showHeader ? (
@@ -216,7 +241,11 @@ export function ByProjectPanel({
         </header>
       ) : null}
 
-      <ProjectLocChart range={range} footer={chartFooter} />
+      <ProjectLocChart
+        range={range}
+        activityRefreshKey={activityLocRefreshKey}
+        footer={chartFooter}
+      />
 
       {displayedActivityErr ? (
         <Card className="border-destructive/50 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -360,14 +389,17 @@ function rollupSummary(r: Rollup): string {
 
 function ProjectLocChart({
   range,
+  activityRefreshKey,
   footer,
 }: {
   range: Range;
+  activityRefreshKey?: string | null;
   footer?: React.ReactNode;
 }) {
   const [data, setData] = React.useState<ProjectLocPayload | null>(null);
   const [err, setErr] = React.useState<string | null>(null);
   const [refreshing, setRefreshing] = React.useState(false);
+  const lastActivityRefreshKey = React.useRef<string | null>(null);
 
   const refreshNow = React.useCallback(async () => {
     setRefreshing(true);
@@ -424,6 +456,31 @@ function ProjectLocChart({
       if (pollTimer) clearTimeout(pollTimer);
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!activityRefreshKey) return;
+    if (lastActivityRefreshKey.current === activityRefreshKey) return;
+    lastActivityRefreshKey.current = activityRefreshKey;
+
+    let live = true;
+    setRefreshing(true);
+    fetchProjectLoc(true)
+      .then((d) => {
+        if (!live) return;
+        setData(d);
+        setErr(null);
+      })
+      .catch((e) => {
+        if (live) setErr(e instanceof Error ? e.message : String(e));
+      })
+      .finally(() => {
+        if (live) setRefreshing(false);
+      });
+
+    return () => {
+      live = false;
+    };
+  }, [activityRefreshKey]);
 
   const visibleWeeks = React.useMemo(() => {
     if (!data) return [];
@@ -630,6 +687,57 @@ function isProjectLocStale(data: ProjectLocPayload): boolean {
   const cachedAt = new Date(data.cachedAt).getTime();
   if (!Number.isFinite(cachedAt) || cachedAt <= 0) return data.computing;
   return Date.now() - cachedAt >= LOC_REFRESH_STALE_MS;
+}
+
+function buildActivityLocRefreshKey(
+  activity: ActivityPayload | null,
+): string | null {
+  if (!activity) return null;
+
+  const projectStats = new Map<
+    string,
+    { commitCount: number; lastSeen: string }
+  >();
+  for (const rollup of activity.rollups) {
+    if (!rollup.commitCount) continue;
+    const project = rollup.project ?? "(unattributed)";
+    const current = projectStats.get(project) ?? {
+      commitCount: 0,
+      lastSeen: "",
+    };
+    current.commitCount += rollup.commitCount;
+    if (rollup.lastSeen > current.lastSeen) current.lastSeen = rollup.lastSeen;
+    projectStats.set(project, current);
+  }
+
+  const totals = activity.people.reduce(
+    (acc, person) => {
+      acc.commits += person.commitCount ?? 0;
+      acc.added += person.linesAdded ?? 0;
+      acc.removed += person.linesRemoved ?? 0;
+      return acc;
+    },
+    { commits: 0, added: 0, removed: 0 },
+  );
+
+  if (
+    projectStats.size === 0 &&
+    totals.commits === 0 &&
+    totals.added === 0 &&
+    totals.removed === 0
+  ) {
+    return null;
+  }
+
+  const projectPart = [...projectStats.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(
+      ([project, stats]) =>
+        `${project}:${stats.commitCount}:${stats.lastSeen}`,
+    )
+    .join("|");
+
+  return `${totals.commits}:${totals.added}:${totals.removed}:${projectPart}`;
 }
 
 interface TooltipItem {

@@ -1,0 +1,160 @@
+// Chaos — team activity dashboard
+// SQLite for now; schema kept Postgres-compatible (no SQLite-only types).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Person {
+  id            String     @id @default(cuid())
+  displayName   String
+  githubLogin   String?    @unique
+  jiraAccountId String?    @unique
+  role          String?
+  activities    Activity[]
+}
+
+model Activity {
+  id          String   @id @default(cuid())
+  personId    String
+  person      Person   @relation(fields: [personId], references: [id])
+  source      String
+  type        String
+  externalId  String   @unique
+  title       String
+  url         String?
+  occurredAt  DateTime
+  metadata    String   // JSON-encoded; stored as TEXT on SQLite, upgrade to Json on Postgres
+  featureKey  String?
+
+  @@index([personId, occurredAt])
+  @@index([featureKey])
+  @@index([occurredAt])
+}
+
+model Feature {
+  id         String   @id @default(cuid())
+  featureKey String   @unique
+  title      String
+  summary    String?
+  source     String
+  firstSeen  DateTime
+  lastSeen   DateTime
+}
+
+model SyncState {
+  id        String   @id
+  lastSync  DateTime
+  lastError String?
+}
+
+model Cache {
+  key       String   @id
+  value     String
+  updatedAt DateTime
+}
+
+model UnmappedContributor {
+  id             String   @id @default(cuid())
+  githubLogin    String?  @unique
+  jiraAccountId  String?  @unique
+  firstSeen      DateTime
+  lastSeen       DateTime
+  sampleActivity String
+}
+
+// ───────────────────────── Claude Code telemetry ─────────────────────────
+// Events emitted by `claude` CLI hooks on developer laptops, POSTed to
+// /api/claude-event, render into the /claude kanban view.
+//
+// Privacy-by-default: we never store file contents, command strings, or
+// prompt bodies beyond the FIRST user prompt (kept as a session opener,
+// truncated to 500 chars). All subsequent prompts are dropped server-side.
+
+model ClaudeSession {
+  id             String        @id @default(cuid())
+  // From Claude Code itself — one row per `claude` invocation.
+  sessionUuid    String        @unique
+  // Identity (from helper script env / fallbacks).
+  user           String
+  host           String?
+  cwd            String?
+
+  startedAt      DateTime      @default(now())
+  lastEventAt    DateTime      @default(now())
+  endedAt        DateTime?
+
+  toolUseCount   Int           @default(0)
+  promptCount    Int           @default(0)
+  errorCount     Int           @default(0)
+
+  // First UserPromptSubmit body, truncated. Treated as a session opener so
+  // teammates can tell "what was Maya working on" without exposing the rest.
+  firstPrompt    String?
+
+  events         ClaudeEvent[]
+
+  @@index([user, lastEventAt])
+  @@index([lastEventAt])
+}
+
+model ClaudeEvent {
+  id         String        @id @default(cuid())
+  sessionId  String
+  session    ClaudeSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Stop | SessionEnd | Error
+  type       String
+  tool       String?
+  durationMs Int?
+  ts         DateTime      @default(now())
+
+  @@index([sessionId, ts])
+}
+
+// ───────────────────────── Codex CLI telemetry ─────────────────────────
+// Same shape as ClaudeSession/ClaudeEvent — Codex 0.125+ ships hooks with
+// payloads that match Claude Code's (session_id, hook_event_name, prompt,
+// tool_name…), so the helper script + ingest path are deliberately parallel.
+// Kept as a separate table rather than a `tool` discriminator so the Claude
+// pipeline can't regress on Codex changes (and vice versa).
+
+model CodexSession {
+  id             String       @id @default(cuid())
+  sessionUuid    String       @unique
+  user           String
+  host           String?
+  cwd            String?
+
+  startedAt      DateTime     @default(now())
+  lastEventAt    DateTime     @default(now())
+  endedAt        DateTime?
+
+  toolUseCount   Int          @default(0)
+  promptCount    Int          @default(0)
+  errorCount     Int          @default(0)
+
+  firstPrompt    String?
+
+  events         CodexEvent[]
+
+  @@index([user, lastEventAt])
+  @@index([lastEventAt])
+}
+
+model CodexEvent {
+  id         String       @id @default(cuid())
+  sessionId  String
+  session    CodexSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // SessionStart | UserPromptSubmit | PreToolUse | PostToolUse | Stop | PermissionRequest | Error
+  type       String
+  tool       String?
+  durationMs Int?
+  ts         DateTime     @default(now())
+
+  @@index([sessionId, ts])
+}

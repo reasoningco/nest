@@ -219,7 +219,10 @@ export async function restoreSession(sessionId?: string): Promise<PublicSession>
   }
 
   const settings = await readSettings()
-  const persistedApiKey = settings.cursorApiKey?.trim()
+  const storedApiKey = settings.cursorApiKey?.trim()
+  const serverApiKey =
+    process.env.NEST_CURSOR_API_KEY?.trim() || process.env.CURSOR_API_KEY?.trim()
+  const persistedApiKey = storedApiKey || serverApiKey
   if (!persistedApiKey) {
     return publicSession(createLocalSession())
   }
@@ -232,12 +235,14 @@ export async function restoreSession(sessionId?: string): Promise<PublicSession>
     role = resolveRole(user)
   } catch (error) {
     if (!isCursorRateLimitError(error)) {
-      await writeSettings({
-        ...settings,
-        cursorApiKey: undefined,
-        cursorUser: null,
-        cursorRole: undefined,
-      }).catch(() => undefined)
+      if (storedApiKey) {
+        await writeSettings({
+          ...settings,
+          cursorApiKey: undefined,
+          cursorUser: null,
+          cursorRole: undefined,
+        }).catch(() => undefined)
+      }
       return publicSession(createLocalSession())
     }
     user = settings.cursorUser ?? null
@@ -245,12 +250,14 @@ export async function restoreSession(sessionId?: string): Promise<PublicSession>
   }
   assertRole(role, "viewer")
 
-  await writeSettings({
-    ...settings,
-    cursorApiKey: persistedApiKey,
-    cursorRole: role,
-    cursorUser: user,
-  }).catch(() => undefined)
+  if (storedApiKey) {
+    await writeSettings({
+      ...settings,
+      cursorApiKey: persistedApiKey,
+      cursorRole: role,
+      cursorUser: user,
+    }).catch(() => undefined)
+  }
 
   const session: Session = {
     id: randomUUID(),
@@ -268,7 +275,7 @@ export async function restoreSession(sessionId?: string): Promise<PublicSession>
 
   return {
     ...publicSession(session),
-    hasPersistedKey: true,
+    hasPersistedKey: Boolean(storedApiKey),
   }
 }
 

@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --border-radius-lg: 14px;
+}
+
+html,
+body {
+  background: #faf9f5;
+  color: #141413;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Helvetica,
+    Arial, sans-serif;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Hairline borders — approximate 0.5px with a 1px @ 0.6 opacity on standard
+   displays, and true 0.5px on retina via device-pixel-ratio media query. */
+.hairline {
+  border: 1px solid rgba(20, 20, 19, 0.12);
+}
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .hairline {
+    border-width: 0.5px;
+    border-color: rgba(20, 20, 19, 0.18);
+  }
+}
+
+/* Cards */
+.card {
+  background: #ffffff;
+  border-radius: var(--border-radius-lg);
+}
+
+/* Status pill colours, all subdued. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+.pill-done { background: #e1ecdc; color: #2d5a2b; }
+.pill-merged { background: #ddd7ea; color: #3f2a6b; }
+.pill-in_review { background: #f0e1cb; color: #6b4417; }
+.pill-in_progress { background: #e8dccb; color: #6b5117; }
+.pill-open { background: #eceae3; color: #6b6b66; }

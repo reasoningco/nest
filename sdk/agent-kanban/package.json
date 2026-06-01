@@ -9,6 +9,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "telegram:delete-webhook": "scripts/telegram-webhook delete",
+    "telegram:info": "scripts/telegram-webhook info",
+    "telegram:set-webhook": "scripts/telegram-webhook set",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "pnpm run typecheck"
   },

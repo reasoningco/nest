@@ -1,0 +1,108 @@
+name: Jira Cursor Bridge Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to deploy when rollback_ref is empty"
+        required: true
+        default: "main"
+      rollback_ref:
+        description: "Emergency rollback ref. When set, production main is reset to this ref."
+        required: false
+        default: ""
+
+jobs:
+  gate:
+    name: Typecheck and test gate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/jira-cursor-bridge
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.rollback_ref != '' && inputs.rollback_ref || inputs.ref }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: sdk/jira-cursor-bridge/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+  deploy:
+    name: Deploy production
+    runs-on: ubuntu-latest
+    needs: gate
+    steps:
+      - name: Configure SSH
+        env:
+          PROD_SSH_HOST: ${{ secrets.TRC3_SSH_HOST }}
+          PROD_SSH_KEY: ${{ secrets.TRC3_SSH_KEY }}
+          PROD_SSH_PORT: ${{ secrets.TRC3_SSH_PORT }}
+          PROD_SSH_USER: ${{ secrets.TRC3_SSH_USER }}
+        run: |
+          test -n "$PROD_SSH_HOST"
+          test -n "$PROD_SSH_KEY"
+          test -n "$PROD_SSH_USER"
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$PROD_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "${PROD_SSH_PORT:-22}" "$PROD_SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy checked ref
+        env:
+          DEPLOY_REF: ${{ inputs.ref }}
+          ROLLBACK_REF: ${{ inputs.rollback_ref }}
+          PROD_SSH_HOST: ${{ secrets.TRC3_SSH_HOST }}
+          PROD_SSH_PORT: ${{ secrets.TRC3_SSH_PORT }}
+          PROD_SSH_USER: ${{ secrets.TRC3_SSH_USER }}
+        run: |
+          target_ref="${ROLLBACK_REF:-$DEPLOY_REF}"
+          ssh -i ~/.ssh/deploy_key -p "${PROD_SSH_PORT:-22}" "$PROD_SSH_USER@$PROD_SSH_HOST" \
+            bash -s -- "$target_ref" "$ROLLBACK_REF" <<'REMOTE'
+          set -euo pipefail
+          TARGET_REF="$1"
+          ROLLBACK_REF="$2"
+
+          cd /srv/cookbook
+          git fetch origin --tags
+          git checkout main
+          if [ -n "${ROLLBACK_REF:-}" ]; then
+            git reset --hard "$TARGET_REF"
+          else
+            git pull --ff-only origin "$TARGET_REF"
+          fi
+
+          npm --prefix sdk/jira-cursor-bridge ci
+          npm --prefix sdk/jira-cursor-bridge run typecheck
+          npm --prefix sdk/jira-cursor-bridge test
+
+          sudo mkdir -p /var/lib/jira-cursor-bridge
+          sudo install -m 0644 sdk/jira-cursor-bridge/deploy/systemd/jira-cursor-bridge.service \
+            /etc/systemd/system/jira-cursor-bridge.service
+          sudo systemctl daemon-reload
+          sudo systemctl restart jira-cursor-bridge
+          for i in $(seq 1 30); do
+            code="$(curl -fsS -o /tmp/jira-cursor-bridge-health.json -w '%{http_code}' \
+              http://127.0.0.1:8787/healthz 2>/tmp/jira-cursor-bridge-curl.err || true)"
+            if [ "$code" = "200" ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat /tmp/jira-cursor-bridge-curl.err >&2
+          exit 1
+          REMOTE

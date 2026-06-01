@@ -46,6 +46,7 @@ const STATUS_LABELS: Record<Rollup["status"], string> = {
 
 const PAGE_DAYS = 30;
 const DISPLAY_TZ = "America/Los_Angeles";
+const ACTIVITY_REFRESH_POLL_MS = 60_000;
 
 const WEEKS_FOR_RANGE: Record<Range, number | "all"> = {
   today: 4,
@@ -106,28 +107,47 @@ export function OrgActivityView() {
 
   React.useEffect(() => {
     let live = true;
-    const loadingTimer = window.setTimeout(() => {
-      if (live) setLoading(true);
-    }, 0);
-    fetch(`/api/chaos/activity?range=${range}`, { cache: "no-store" })
-      .then(async (r) => {
+    let loadingTimer: number | null = null;
+    let pollTimer: number | null = null;
+
+    async function load(showLoading: boolean) {
+      if (showLoading) {
+        loadingTimer = window.setTimeout(() => {
+          if (live) setLoading(true);
+        }, 0);
+      }
+
+      try {
+        const r = await fetch(`/api/chaos/activity?range=${range}`, {
+          cache: "no-store",
+        });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return (await r.json()) as ActivityPayload;
-      })
-      .then((d) => {
+        const d = (await r.json()) as ActivityPayload;
         if (!live) return;
         setData(d);
         setErr(null);
-      })
-      .catch((e) => {
+      } catch (e) {
         if (live) setErr(e instanceof Error ? e.message : String(e));
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
+      } finally {
+        if (loadingTimer) {
+          window.clearTimeout(loadingTimer);
+          loadingTimer = null;
+        }
+        if (live && showLoading) setLoading(false);
+        if (live) {
+          pollTimer = window.setTimeout(
+            () => void load(false),
+            ACTIVITY_REFRESH_POLL_MS,
+          );
+        }
+      }
+    }
+
+    void load(true);
     return () => {
       live = false;
-      window.clearTimeout(loadingTimer);
+      if (loadingTimer) window.clearTimeout(loadingTimer);
+      if (pollTimer) window.clearTimeout(pollTimer);
     };
   }, [range]);
 
@@ -734,9 +754,9 @@ function buildLeaderboard(
       const score =
         100 *
         (0.3 * normalized(features, maxFeatures) +
-          0.3 * normalized(linesAdded, maxAdded) +
+          0.4 * normalized(linesAdded, maxAdded) +
           0.15 * normalized(linesRemoved, maxRemoved) +
-          0.25 * normalized(ticketsClosed, maxTickets));
+          0.15 * normalized(ticketsClosed, maxTickets));
       return {
         person,
         rank: 0,
@@ -744,7 +764,7 @@ function buildLeaderboard(
         linesAdded,
         linesRemoved,
         ticketsClosed,
-        score: Math.round(score),
+        score,
       };
     })
     .sort((a, b) => {
@@ -769,7 +789,7 @@ function LeaderboardPersonRow({
 }) {
   const isTop = row.rank === 1 && !row.person.external;
   const formula =
-    "Score = 30% features + 30% lines added + 15% lines removed + 25% Jira tickets closed, log-normalized within this range.";
+    "Score = 30% features + 40% lines added + 15% lines removed + 15% Jira tickets closed, log-normalized within this range.";
   return (
     <button
       type="button"
@@ -818,7 +838,7 @@ function LeaderboardPersonRow({
         {row.ticketsClosed}
       </div>
       <div className="text-right text-sm font-medium tabular-nums">
-        {row.score}
+        {row.score.toFixed(1)}
       </div>
     </button>
   );
