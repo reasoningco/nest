@@ -19,8 +19,9 @@ export function startBackgroundJobs() {
       .catch((err) => console.error("[chaos] initial sync failed:", err));
   }, 2000);
 
-  // 2) Incremental sync every 15 minutes.
-  cron.schedule("*/15 * * * *", async () => {
+  // 2) Incremental sync every 4 hours. Manual refresh paths remain available
+  // from the UI when fresh data is needed immediately.
+  cron.schedule("0 */4 * * *", async () => {
     try {
       const r = await runSync();
       const errSuffix = r.errors.length > 0 ? `, ${r.errors.length} errors: ${r.errors[0]}` : "";

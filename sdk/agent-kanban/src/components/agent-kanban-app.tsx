@@ -167,7 +167,7 @@ const sidebarDefaultVersionStorageKey = "agent-kanban-sidebar-default-version"
 const sidebarDefaultVersion = "org-activity-first-v1"
 const defaultSidebarFilter: SidebarFilter = "orgActivity"
 const defaultGroupBy: GroupBy = "status"
-const autoRefreshMs = 30_000
+const autoRefreshMs = 4 * 60 * 60 * 1000
 
 const groupOptions: GroupOption[] = [
   { id: "status", label: "Status", icon: CirclesFourIcon },

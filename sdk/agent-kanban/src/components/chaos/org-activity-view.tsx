@@ -46,7 +46,7 @@ const STATUS_LABELS: Record<Rollup["status"], string> = {
 
 const PAGE_DAYS = 30;
 const DISPLAY_TZ = "America/Los_Angeles";
-const ACTIVITY_REFRESH_POLL_MS = 60_000;
+const ACTIVITY_REFRESH_POLL_MS = 4 * 60 * 60 * 1000;
 
 const WEEKS_FOR_RANGE: Record<Range, number | "all"> = {
   today: 4,

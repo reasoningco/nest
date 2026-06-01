@@ -16,7 +16,8 @@ import type {
   SessionsResponse,
 } from "./types";
 
-const POLL_MS = 5_000;
+const POLL_MS = 4 * 60 * 60 * 1000;
+const POLL_LABEL = "4h";
 
 const SOURCES: {
   tool: "claude" | "codex";
@@ -104,7 +105,7 @@ export function UserSdasView() {
           <p className="text-xs text-muted-foreground">
             {sessions.length === 0
               ? "Live activity across team laptops · last 24h"
-              : `${sessions.length} session${sessions.length === 1 ? "" : "s"} · last 24h · refresh ${POLL_MS / 1000}s`}
+              : `${sessions.length} session${sessions.length === 1 ? "" : "s"} · last 24h · refresh ${POLL_LABEL}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-3">

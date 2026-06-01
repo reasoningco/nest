@@ -49,10 +49,11 @@ const WEEKS_FOR_RANGE: Record<Range, number | "all"> = {
   all: "all",
 };
 
-const LOC_REFRESH_STALE_MS = 15 * 60 * 1000;
+const AUTO_REFRESH_MS = 4 * 60 * 60 * 1000;
+const LOC_REFRESH_STALE_MS = AUTO_REFRESH_MS;
 const LOC_REFRESH_POLL_MS = 8_000;
-const LOC_REFRESH_IDLE_POLL_MS = 60_000;
-const ACTIVITY_REFRESH_POLL_MS = 60_000;
+const LOC_REFRESH_IDLE_POLL_MS = AUTO_REFRESH_MS;
+const ACTIVITY_REFRESH_POLL_MS = AUTO_REFRESH_MS;
 
 const LOC_COLORS = [
   "#c15f3c", // terracotta

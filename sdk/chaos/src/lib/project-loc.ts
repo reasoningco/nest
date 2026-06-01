@@ -17,6 +17,13 @@ const TTL_MS = 24 * 60 * 60 * 1000;
 // frontend slices it based on the selected time-range tab.
 const WEEKS_BUFFER = 2; // pad the window by a couple weeks so the first point
                        // lands on a Sunday on-or-before ALL_TIME_ORIGIN.
+const WEEKLY_THROUGHPUT_CORRECTIONS = [
+  {
+    date: "2025-11-09",
+    personId: "github:anmolgxrg",
+    additions: 37_000,
+  },
+] as const;
 
 export interface ProjectSeries {
   project: string;
@@ -214,7 +221,12 @@ async function compute(): Promise<ProjectLocPayload> {
 
   const weeks = canonicalWeeks;
   const weeklyThroughput = canonicalWeeks.map((date) => {
-    const contributors = [...(throughputByWeek.get(date)?.values() ?? [])]
+    const contributors = applyWeeklyThroughputCorrections(
+      date,
+      [...(throughputByWeek.get(date)?.values() ?? [])].map((c) => ({
+        ...c,
+      })),
+    )
       .sort((a, z) => z.additions - a.additions)
       .map((c) => ({ ...c }));
     return {
@@ -472,6 +484,21 @@ function resolveContributor(
 
 function normalizeIdentityKey(value: string): string {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function applyWeeklyThroughputCorrections(
+  date: string,
+  contributors: WeeklyLocContributor[],
+): WeeklyLocContributor[] {
+  for (const correction of WEEKLY_THROUGHPUT_CORRECTIONS) {
+    if (correction.date !== date) continue;
+    const contributor = contributors.find(
+      (c) => c.personId === correction.personId,
+    );
+    if (!contributor) continue;
+    contributor.additions = correction.additions;
+  }
+  return contributors;
 }
 
 function recordWeeklyThroughput({
