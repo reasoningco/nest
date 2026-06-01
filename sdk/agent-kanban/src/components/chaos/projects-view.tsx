@@ -808,6 +808,7 @@ function WeeklyLocThroughputPanel({
     x: number;
     y: number;
   } | null>(null);
+  const scrollRef = React.useRef<HTMLDivElement | null>(null);
 
   const points = React.useMemo(() => {
     const byWeek = new Map(throughput.map((p) => [p.date, p]));
@@ -857,6 +858,13 @@ function WeeklyLocThroughputPanel({
   const maxWeek = Math.max(1, ...points.map((point) => point.additions));
   const total = points.reduce((sum, point) => sum + point.additions, 0);
   const latest = points.at(-1)?.additions ?? 0;
+  const latestWeekDate = points.at(-1)?.date ?? "";
+
+  React.useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollLeft = el.scrollWidth;
+  }, [latestWeekDate, points.length]);
 
   const showTooltip = React.useCallback(
     (point: WeeklyLocThroughputPoint, clientX: number, clientY: number) => {
@@ -895,7 +903,11 @@ function WeeklyLocThroughputPanel({
         </div>
       </div>
 
-      <div className="mt-3 overflow-x-auto pb-1" onScroll={() => setTooltip(null)}>
+      <div
+        ref={scrollRef}
+        className="mt-3 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        onScroll={() => setTooltip(null)}
+      >
         <div
           className="grid min-w-[480px] items-end gap-2"
           style={{
